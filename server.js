@@ -18,7 +18,6 @@ const app = express();
 app.set('trust proxy', 1);
 app.use(express.json({ limit: '10kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
-// Serve the existing single-page frontend for Render's root URL.
 app.get('/', (q, s) => s.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 const getDevs = id => {
@@ -165,4 +164,8 @@ app.post('/api/chat', auth, chatLimit, async (q, s) => {
       }
     }
 
-    s.json({ reply: reply.trim() || 'ठीक है, हो
+    s.json({ reply: reply.trim() || 'ठीक है, हो गया।', devices: getDevs(q.user.id), pc });
+  } catch (e) { console.error(e.message); s.status(502).json({ error: 'AI से जवाब नहीं मिला' }); }
+});
+
+app.listen(process.env.PORT || 3000, () => console.log('Jarvis चालू'));
