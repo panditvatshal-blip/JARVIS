@@ -72,35 +72,97 @@ const TOOLS = [
       dir: { type: 'string', enum: ['up', 'down', 'mute'] } }, required: ['action'] } },
 ];
 
+const GEMINI_TOOLS = [{
+  functionDeclarations: [
+    {
+      name: 'set_device',
+      description: 'Turn a virtual smart-home device on or off',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          device: { type: 'STRING', enum: KEYS },
+          state: { type: 'BOOLEAN' }
+        },
+        required: ['device', 'state']
+      }
+    },
+    {
+      name: 'pc_action',
+      description: "Control the user's PC",
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          action: { type: 'STRING', enum: ['open_app', 'volume', 'screenshot'] },
+          name: { type: 'STRING', enum: ['notepad', 'calculator', 'chrome', 'vscode'] },
+          dir: { type: 'STRING', enum: ['up', 'down', 'mute'] }
+        },
+        required: ['action']
+      }
+    }
+  ]
+}];
+
 app.post('/api/chat', auth, chatLimit, async (q, s) => {
   const text = String((q.body || {}).text || '').slice(0, 300);
   if (!text) return s.status(400).json({ error: 'खाली कमांड' });
-  if (!process.env.ANTHROPIC_API_KEY)
+
+  const sysPrompt = `You are Jarvis, a voice assistant for ${q.user.name}. Reply in Hindi (Devanagari), one short sentence. Use tools to act. Devices are virtual: light, fan, ac, tv.`;
+
+  if (!process.env.GEMINI_API_KEY && !process.env.ANTHROPIC_API_KEY)
     return s.json({ reply: 'AI अभी चालू नहीं है। सीधे कमांड बोलो, जैसे लाइट ऑन कर।', devices: getDevs(q.user.id), pc: [] });
+
   try {
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({
-        model: process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5',
-        max_tokens: 300,
-        system: `You are Jarvis, a voice assistant for ${q.user.name}. Reply in Hindi (Devanagari), one short sentence. Use tools to act. Devices are virtual: light, fan, ac, tv.`,
-        tools: TOOLS,
-        messages: [{ role: 'user', content: text }],
-      }),
-    });
-    const j = await r.json();
-    if (!r.ok) throw new Error((j.error && j.error.message) || 'api error');
-    let reply = ''; const pc = [];
-    for (const b of j.content) {
-      if (b.type === 'text') reply += b.text;
-      else if (b.type === 'tool_use') {
-        if (b.name === 'set_device' && KEYS.includes(b.input.device)) setDevs(q.user.id, { [b.input.device]: b.input.state });
-        else if (b.name === 'pc_action') pc.push(b.input);
+    let reply = '';
+    const pc = [];
+
+    if (process.env.GEMINI_API_KEY) {
+      const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: sysPrompt }] },
+          contents: [{ role: 'user', parts: [{ text }] }],
+          tools: GEMINI_TOOLS
+        })
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error((j.error && j.error.message) || 'gemini api error');
+      const parts = (j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts) || [];
+      for (const p of parts) {
+        if (p.text) reply += p.text;
+        else if (p.functionCall) {
+          const { name, args } = p.functionCall;
+          if (name === 'set_device' && args && KEYS.includes(args.device)) {
+            setDevs(q.user.id, { [args.device]: args.state });
+            if (!reply) reply = `${args.device} ${args.state ? 'चालू' : 'बंद'} कर दिया है।`;
+          } else if (name === 'pc_action' && args) {
+            pc.push(args);
+            if (!reply) reply = 'पीसी कमांड भेज दी गई है।';
+          }
+        }
+      }
+    } else {
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({
+          model: process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5',
+          max_tokens: 300,
+          system: sysPrompt,
+          tools: TOOLS,
+          messages: [{ role: 'user', content: text }],
+        }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error((j.error && j.error.message) || 'api error');
+      for (const b of j.content) {
+        if (b.type === 'text') reply += b.text;
+        else if (b.type === 'tool_use') {
+          if (b.name === 'set_device' && KEYS.includes(b.input.device)) setDevs(q.user.id, { [b.input.device]: b.input.state });
+          else if (b.name === 'pc_action') pc.push(b.input);
+        }
       }
     }
-    s.json({ reply: reply || 'ठीक है, हो गया।', devices: getDevs(q.user.id), pc });
-  } catch (e) { console.error(e.message); s.status(502).json({ error: 'AI से जवाब नहीं मिला' }); }
-});
 
-app.listen(process.env.PORT || 3000, () => console.log('Jarvis चालू'));
+    s.json({ reply: reply.trim() || 'ठीक है, हो
