@@ -17,7 +17,7 @@ const KEYS = ['light', 'fan', 'ac', 'tv'];
 const NAMES_HI = { light: 'लाइट', fan: 'पंखा', ac: 'AC', tv: 'TV' };
 const app = express();
 app.set('trust proxy', 1);
-app.use(express.json({ limit: '10kb' }));
+app.use(express.json({ limit: '40kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/', (q, s) => s.sendFile(path.join(__dirname, 'public', 'index.html')));
 
@@ -144,10 +144,10 @@ const CLAUDE_TOOLS = [
       dir: { type: 'string', enum: ['up', 'down', 'mute'] } }, required: ['action'] } },
 ];
 
-async function callGemini(model, text, sysPrompt) {
+async function callGemini(model, text, sysPrompt, hist) {
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(12000),
-    body: JSON.stringify({ systemInstruction: { parts: [{ text: sysPrompt }] }, contents: [{ role: 'user', parts: [{ text }] }], tools: GEMINI_TOOLS }),
+    body: JSON.stringify({ systemInstruction: { parts: [{ text: sysPrompt }] }, contents: [...hist.map(h => ({ role: h.r === 'user' ? 'user' : 'model', parts: [{ text: h.t }] })), { role: 'user', parts: [{ text }] }], tools: GEMINI_TOOLS }),
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) { const e = new Error((j.error && j.error.message) || 'gemini error'); e.status = r.status; throw e; }
@@ -164,11 +164,11 @@ async function callGemini(model, text, sysPrompt) {
   return out;
 }
 
-async function callClaude(model, text, sysPrompt) {
+async function callClaude(model, text, sysPrompt, hist) {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST', signal: AbortSignal.timeout(12000),
     headers: { 'content-type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({ model, max_tokens: 300, system: sysPrompt, tools: CLAUDE_TOOLS, messages: [{ role: 'user', content: text }] }),
+    body: JSON.stringify({ model, max_tokens: 300, system: sysPrompt, tools: CLAUDE_TOOLS, messages: [...hist.map(h => ({ role: h.r === 'user' ? 'user' : 'assistant', content: h.t })), { role: 'user', content: text }] }),
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) { const e = new Error((j.error && j.error.message) || 'claude error'); e.status = r.status; throw e; }
@@ -183,14 +183,29 @@ async function callClaude(model, text, sysPrompt) {
   return out;
 }
 
-async function askAI(text, sysPrompt) {
+function cleanHist(h) {
+  if (!Array.isArray(h)) return [];
+  const out = [];
+  for (const x of h.slice(-8)) {
+    const r = x && x.r === 'model' ? 'model' : x && x.r === 'user' ? 'user' : null;
+    const t = String((x && x.t) || '').slice(0, 300);
+    if (!r || !t) continue;
+    if (!out.length && r !== 'user') continue;
+    if (out.length && out[out.length - 1].r === r) continue;
+    out.push({ r, t });
+  }
+  if (out.length && out[out.length - 1].r === 'user') out.pop();
+  return out;
+}
+
+async function askAI(text, sysPrompt, hist) {
   const gem = [];
   if (process.env.GEMINI_API_KEY) {
     const ms = [process.env.GEMINI_MODEL, 'gemini-3.8-flash', 'gemini-3.5-flash-lite'].filter(Boolean);
-    [...new Set(ms)].forEach(m => gem.push(() => callGemini(m, text, sysPrompt).then(r => { console.log('AI ok:', m); return r; })));
+    [...new Set(ms)].forEach(m => gem.push(() => callGemini(m, text, sysPrompt, hist).then(r => { console.log('AI ok:', m); return r; })));
   }
   const claude = process.env.ANTHROPIC_API_KEY
-    ? () => callClaude(process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5', text, sysPrompt) : null;
+    ? () => callClaude(process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5', text, sysPrompt, hist) : null;
 
   let lastErr;
   for (let round = 0; round < 2; round++) {
@@ -224,9 +239,9 @@ app.post('/api/chat', auth, chatLimit, async (q, s) => {
   if (!process.env.GEMINI_API_KEY && !process.env.ANTHROPIC_API_KEY)
     return s.json({ reply: 'AI अभी चालू नहीं है। सीधे कमांड बोलो, जैसे लाइट ऑन कर।', devices: getDevs(uid), pc: [] });
 
-  const sysPrompt = `You are Jarvis, a voice assistant for ${q.user.name}. Reply in Hindi (Devanagari), one short sentence. Use tools to act. Devices are virtual: light, fan, ac, tv.`;
+  const sysPrompt = `You are Jarvis, a friendly voice assistant for ${q.user.name}. Talk like a friend in a live conversation. Answer any question the user asks (general knowledge, advice, math, chit-chat), not only device control. Reply in Hindi (Devanagari) in 1 to 3 short, simple sentences that sound natural when spoken aloud. No markdown, no lists, no emojis. Use tools when the user wants to control devices or the PC. Devices are virtual: light, fan, ac, tv.`;
   try {
-    const o = await askAI(text, sysPrompt);
+    const o = await askAI(text, sysPrompt, cleanHist((q.body || {}).history));
     if (Object.keys(o.devs).length) setDevs(uid, o.devs);
     let reply = o.reply.trim();
     if (!reply) {
