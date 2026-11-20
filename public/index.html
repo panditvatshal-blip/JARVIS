@@ -140,11 +140,20 @@ function onVoice(t){
  const rest=t.slice(m.index+m[0].length).trim();
  rest?run(rest):say('जी '+NAME+', बोलिए।');
 }
+const ST0=$('#st').textContent;let stT=0;
+function setSt(t,keep){$('#st').textContent=t;clearTimeout(stT);if(!keep)stT=setTimeout(()=>{$('#st').textContent=ST0},6000)}
+const VERR={'network':'वॉइस सर्विस नहीं मिली। Brave में वॉइस नहीं चलता, Chrome या Edge में खोलो।','not-allowed':'माइक की अनुमति दो (एड्रेस बार में 🔒 पर क्लिक करके)।','service-not-allowed':'इस ब्राउज़र में वॉइस बंद है। Chrome या Edge इस्तेमाल करो।','audio-capture':'माइक नहीं मिला। माइक चेक करो।','language-not-supported':'यह भाषा सपोर्ट नहीं है।'};
 function startRec(){
  rec=new SR();rec.lang='hi-IN';rec.continuous=$('#wake').checked;rec.interimResults=false;
- rec.onresult=e=>onVoice(e.results[e.results.length-1][0].transcript);
+ rec.onstart=()=>setSt('🎤 सुन रहा हूँ…',true);
+ rec.onresult=e=>{const tx=e.results[e.results.length-1][0].transcript;setSt('सुना: “'+tx+'”');onVoice(tx)};
  rec.onend=()=>{if(listening&&$('#wake').checked){try{startRec()}catch(e){}}else{listening=false;$('#mic').classList.remove('hot')}};
- rec.onerror=e=>{if(e.error==='not-allowed'){listening=false;say('माइक की अनुमति दो।')}};
+ rec.onerror=e=>{
+  if(e.error==='no-speech'){setSt('कुछ सुनाई नहीं दिया, फिर से बोलो।');return}
+  if(e.error==='aborted')return;
+  listening=false;$('#mic').classList.remove('hot');
+  const m=VERR[e.error]||('वॉइस एरर: '+e.error);setSt('⚠️ '+m,true);say(m);
+ };
  rec.start();
 }
 $('#mic').onclick=()=>{
