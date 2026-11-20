@@ -98,7 +98,7 @@ label{color:var(--mut)}
 
 <script>
 const $=s=>document.querySelector(s);
-const J3={pulse:0,think:0};let speaking=false,speakEnd=0;const H=[];
+const J3={pulse:0,think:0};let speaking=false,speakEnd=0,spT=0;const H=[];
 let NAME='',TOKEN='';try{TOKEN=localStorage.getItem('jt')||''}catch(e){}
 const D={light:{n:'लाइट',i:'💡',k:['light','lights','लाइट','लाईट','लाइट्स','बत्ती','batti','bulb','बल्ब']},
  fan:{n:'पंखा',i:'🌀',k:['fan','पंखा','पंखे','pankha','फैन']},
@@ -111,16 +111,16 @@ async function ask(t){J3.think=1;setSt('🤔 सोच रहा हूँ…',t
 function render(){$('#grid').innerHTML=Object.keys(D).map(k=>`<button class="dev ${S[k]?'on':''}" data-k="${k}"><span>${D[k].i}</span><b>${D[k].n}</b><small>${S[k]?'चालू':'बंद'}</small></button>`).join('')}
 $('#grid').onclick=e=>{const b=e.target.closest('.dev');if(b){S[b.dataset.k]^=1;save();render()}};
 function log(w,t){const d=document.createElement('div');d.className=w;d.textContent=(w==='U'?'🧑 ':'🤖 ')+t;$('#log').prepend(d);while($('#log').children.length>8)$('#log').lastChild.remove()}
-function say(t){J3.pulse=1;log('J',t);try{const u=new SpeechSynthesisUtterance(t);u.lang='hi-IN';u.onstart=()=>{speaking=true};u.onend=u.onerror=()=>{speaking=false;speakEnd=Date.now()};speechSynthesis.cancel();speechSynthesis.speak(u)}catch(e){}}
+function say(t,quiet){J3.pulse=1;log('J',t);if(quiet)return;try{const u=new SpeechSynthesisUtterance(t);u.lang='hi-IN';const done=()=>{speaking=false;speakEnd=Date.now();clearTimeout(spT)};u.onstart=()=>{speaking=true};u.onend=u.onerror=done;clearTimeout(spT);spT=setTimeout(done,Math.min(12000,600+t.length*110));speechSynthesis.cancel();speechSynthesis.speak(u)}catch(e){}}
 const has=(t,a)=>a.some(x=>/^[a-z]+$/.test(x)?W.includes(x):t.includes(x));
 const ON=['on','ऑन','आन','ओन','चालू','चला','जला','जलाओ','लगा','शुरू','स्टार्ट','खोल','chalu','chala','jala','laga','start'],OFF=['off','ऑफ','ऑफ़','आफ','ओफ','बंद','बन्द','बुझा','band','bujha','stop'];
 function pc(o){if(!ws||ws.readyState!==1)return say('PC एजेंट जुड़ा नहीं है। नीचे से जोड़ो।');ws.send(JSON.stringify(o))}
 function run(raw){
  const t=raw.toLowerCase().trim();if(!t)return;W=t.split(/[\s,.?!]+/);log('U',raw);
- if(has(t,['good night','गुड नाइट','गुड नाईट','शुभ रात्रि'])){Object.keys(S).forEach(k=>S[k]=0);save();render();return say('शुभ रात्रि '+NAME+'। सब बंद कर दिया।')}
- if(has(t,['good morning','गुड मॉर्निंग','सुप्रभात'])){S.light=1;S.fan=1;save();render();return say('सुप्रभात '+NAME+'। लाइट और पंखा चालू कर दिए।')}
+ if(has(t,['good night','गुड नाइट','गुड नाईट','शुभ रात्रि'])){Object.keys(S).forEach(k=>S[k]=0);save();render();return say('शुभ रात्रि '+NAME+'। सब बंद कर दिया।',true)}
+ if(has(t,['good morning','गुड मॉर्निंग','सुप्रभात'])){S.light=1;S.fan=1;save();render();return say('सुप्रभात '+NAME+'। लाइट और पंखा चालू कर दिए।',true)}
  const dk=Object.keys(D).find(k=>has(t,D[k].k));
- if(dk&&(has(t,ON)||has(t,OFF))){S[dk]=has(t,OFF)?0:1;save();render();return say(D[dk].n+(S[dk]?' चालू':' बंद')+' कर दिया।')}
+ if(dk&&(has(t,ON)||has(t,OFF))){S[dk]=has(t,OFF)?0:1;save();render();return say(D[dk].n+(S[dk]?' चालू':' बंद')+' कर दिया।',true)}
  if(has(t,['volume','वॉल्यूम','आवाज़'])){const d=has(t,['up','बढ़ा','badha','increase'])?'up':has(t,['down','कम','kam','decrease'])?'down':has(t,['mute','म्यूट'])?'mute':'';
   return d?pc({action:'volume',dir:d}):say('वॉल्यूम बढ़ाना है, घटाना है या म्यूट?')}
  if(has(t,['screenshot','स्क्रीनशॉट']))return pc({action:'screenshot'});
@@ -143,11 +143,12 @@ function onVoice(t){
 const ST0=$('#st').textContent;let stT=0;
 function setSt(t,keep){$('#st').textContent=t;clearTimeout(stT);if(!keep)stT=setTimeout(()=>{$('#st').textContent=ST0},6000)}
 const VERR={'network':'वॉइस सर्विस नहीं मिली। Brave में वॉइस नहीं चलता, Chrome या Edge में खोलो।','not-allowed':'माइक की अनुमति दो (एड्रेस बार में 🔒 पर क्लिक करके)।','service-not-allowed':'इस ब्राउज़र में वॉइस बंद है। Chrome या Edge इस्तेमाल करो।','audio-capture':'माइक नहीं मिला। माइक चेक करो।','language-not-supported':'यह भाषा सपोर्ट नहीं है।'};
+function restart(n){if(!listening)return;try{startRec()}catch(e){if(n<5)setTimeout(()=>restart(n+1),500);else{listening=false;$('#mic').classList.remove('hot');setSt('⚠️ माइक बंद हो गया, mic फिर से दबाओ',true)}}}
 function startRec(){
  rec=new SR();rec.lang='hi-IN';rec.continuous=true;rec.interimResults=false;
  rec.onstart=()=>setSt('🎤 सुन रहा हूँ… (बंद करने के लिए mic दबाओ)',true);
- rec.onresult=e=>{if(speaking||Date.now()-speakEnd<800)return;const tx=e.results[e.results.length-1][0].transcript;setSt('सुना: “'+tx+'”');onVoice(tx)};
- rec.onend=()=>{if(listening){setTimeout(()=>{if(listening){try{startRec()}catch(e){}}},250)}else{$('#mic').classList.remove('hot')}};
+ rec.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++){const r=e.results[i];if(!r.isFinal)continue;if(speaking||Date.now()-speakEnd<400)continue;const tx=r[0].transcript;setSt('सुना: “'+tx+'”');onVoice(tx)}};
+ rec.onend=()=>{if(listening)setTimeout(()=>restart(0),250);else $('#mic').classList.remove('hot')};
  rec.onerror=e=>{
   if(e.error==='no-speech'){setSt('कुछ सुनाई नहीं दिया, फिर से बोलो।');return}
   if(e.error==='aborted')return;
