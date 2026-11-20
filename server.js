@@ -146,7 +146,7 @@ const CLAUDE_TOOLS = [
 
 async function callGemini(model, text, sysPrompt) {
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(20000),
+    method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(12000),
     body: JSON.stringify({ systemInstruction: { parts: [{ text: sysPrompt }] }, contents: [{ role: 'user', parts: [{ text }] }], tools: GEMINI_TOOLS }),
   });
   const j = await r.json().catch(() => ({}));
@@ -166,7 +166,7 @@ async function callGemini(model, text, sysPrompt) {
 
 async function callClaude(model, text, sysPrompt) {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST', signal: AbortSignal.timeout(20000),
+    method: 'POST', signal: AbortSignal.timeout(12000),
     headers: { 'content-type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
     body: JSON.stringify({ model, max_tokens: 300, system: sysPrompt, tools: CLAUDE_TOOLS, messages: [{ role: 'user', content: text }] }),
   });
@@ -184,24 +184,29 @@ async function callClaude(model, text, sysPrompt) {
 }
 
 async function askAI(text, sysPrompt) {
-  const tries = [];
+  const gem = [];
   if (process.env.GEMINI_API_KEY) {
-    const ms = [process.env.GEMINI_MODEL || 'gemini-3.8-flash', 'gemini-3.8-flash', 'gemini-3.5-flash-lite'];
-    [...new Set(ms)].forEach(m => tries.push(() => callGemini(m, text, sysPrompt)));
+    const ms = [process.env.GEMINI_MODEL, 'gemini-3.8-flash', 'gemini-3.5-flash-lite'].filter(Boolean);
+    [...new Set(ms)].forEach(m => gem.push(() => callGemini(m, text, sysPrompt).then(r => { console.log('AI ok:', m); return r; })));
   }
-  if (process.env.ANTHROPIC_API_KEY)
-    tries.push(() => callClaude(process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5', text, sysPrompt));
+  const claude = process.env.ANTHROPIC_API_KEY
+    ? () => callClaude(process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5', text, sysPrompt) : null;
 
   let lastErr;
-  for (const fn of tries) {
-    for (let a = 0; a < 2; a++) {
-      try { return await fn(); }
+  for (let round = 0; round < 2; round++) {
+    // saare Gemini models ek saath, jo pehle jawab de wahi le lo
+    if (gem.length) {
+      try { return await Promise.any(gem.map(f => f())); }
       catch (e) {
-        lastErr = e; console.error('AI fail:', e.status || '', e.message);
-        if (![429, 500, 502, 503, 504].includes(e.status)) break; // retry sirf temporary errors pe
-        await sleep(700 * (a + 1));
+        (e.errors || [e]).forEach(x => console.error('AI fail:', x.status || '', x.message));
+        lastErr = (e.errors && e.errors[0]) || e;
       }
     }
+    if (claude) {
+      try { return await claude(); }
+      catch (e) { console.error('AI fail (claude):', e.status || '', e.message); lastErr = e; }
+    }
+    if (round === 0) await sleep(1000);
   }
   throw lastErr || new Error('no AI configured');
 }
