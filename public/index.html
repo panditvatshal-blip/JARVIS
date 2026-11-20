@@ -100,24 +100,24 @@ label{color:var(--mut)}
 const $=s=>document.querySelector(s);
 const J3={pulse:0,think:0};
 let NAME='',TOKEN='';try{TOKEN=localStorage.getItem('jt')||''}catch(e){}
-const D={light:{n:'लाइट',i:'💡',k:['light','लाइट','बत्ती','batti','bulb']},
- fan:{n:'पंखा',i:'🌀',k:['fan','पंखा','pankha']},
- ac:{n:'AC',i:'❄️',k:['ac','एसी']},
- tv:{n:'TV',i:'📺',k:['tv','टीवी','television']}};
+const D={light:{n:'लाइट',i:'💡',k:['light','lights','लाइट','लाईट','लाइट्स','बत्ती','batti','bulb','बल्ब']},
+ fan:{n:'पंखा',i:'🌀',k:['fan','पंखा','पंखे','pankha','फैन']},
+ ac:{n:'AC',i:'❄️',k:['ac','एसी','ए सी','ए.सी','एयर कंडीशनर']},
+ tv:{n:'TV',i:'📺',k:['tv','टीवी','टी वी','टी.वी','television','टेलीविजन']}};
 let S={light:0,fan:0,ac:0,tv:0},ws=null,rec=null,listening=false,W=[];
 async function api(p,m,b){const r=await fetch(p,{method:m||'GET',headers:{'Content-Type':'application/json',Authorization:'Bearer '+TOKEN},body:b?JSON.stringify(b):undefined});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||'कुछ गड़बड़ हुई');return j}
 const save=()=>{api('/api/devices','PUT',S).catch(()=>{})};
-async function ask(t){J3.think=1;try{const r=await api('/api/chat','POST',{text:t});S=Object.assign(S,r.devices);render();say(r.reply);(r.pc||[]).forEach(pc)}catch(e){say(e.message)}finally{J3.think=0}}
+async function ask(t){J3.think=1;setSt('🤔 सोच रहा हूँ…',true);try{const r=await api('/api/chat','POST',{text:t});S=Object.assign(S,r.devices);render();say(r.reply);(r.pc||[]).forEach(pc)}catch(e){say(e.message)}finally{J3.think=0;setSt(ST0)}}
 function render(){$('#grid').innerHTML=Object.keys(D).map(k=>`<button class="dev ${S[k]?'on':''}" data-k="${k}"><span>${D[k].i}</span><b>${D[k].n}</b><small>${S[k]?'चालू':'बंद'}</small></button>`).join('')}
 $('#grid').onclick=e=>{const b=e.target.closest('.dev');if(b){S[b.dataset.k]^=1;save();render()}};
 function log(w,t){const d=document.createElement('div');d.className=w;d.textContent=(w==='U'?'🧑 ':'🤖 ')+t;$('#log').prepend(d);while($('#log').children.length>8)$('#log').lastChild.remove()}
 function say(t){J3.pulse=1;log('J',t);try{const u=new SpeechSynthesisUtterance(t);u.lang='hi-IN';speechSynthesis.cancel();speechSynthesis.speak(u)}catch(e){}}
 const has=(t,a)=>a.some(x=>/^[a-z]+$/.test(x)?W.includes(x):t.includes(x));
-const ON=['on','चालू','चला','जला','खोल','chalu','chala','jala','start'],OFF=['off','बंद','बुझा','band','bujha','stop'];
+const ON=['on','ऑन','आन','ओन','चालू','चला','जला','जलाओ','लगा','शुरू','स्टार्ट','खोल','chalu','chala','jala','laga','start'],OFF=['off','ऑफ','ऑफ़','आफ','ओफ','बंद','बन्द','बुझा','band','bujha','stop'];
 function pc(o){if(!ws||ws.readyState!==1)return say('PC एजेंट जुड़ा नहीं है। नीचे से जोड़ो।');ws.send(JSON.stringify(o))}
 function run(raw){
  const t=raw.toLowerCase().trim();if(!t)return;W=t.split(/[\s,.?!]+/);log('U',raw);
- if(has(t,['good night','गुड नाइट','शुभ रात्रि'])){Object.keys(S).forEach(k=>S[k]=0);save();render();return say('शुभ रात्रि '+NAME+'। सब बंद कर दिया।')}
+ if(has(t,['good night','गुड नाइट','गुड नाईट','शुभ रात्रि'])){Object.keys(S).forEach(k=>S[k]=0);save();render();return say('शुभ रात्रि '+NAME+'। सब बंद कर दिया।')}
  if(has(t,['good morning','गुड मॉर्निंग','सुप्रभात'])){S.light=1;S.fan=1;save();render();return say('सुप्रभात '+NAME+'। लाइट और पंखा चालू कर दिए।')}
  const dk=Object.keys(D).find(k=>has(t,D[k].k));
  if(dk&&(has(t,ON)||has(t,OFF))){S[dk]=has(t,OFF)?0:1;save();render();return say(D[dk].n+(S[dk]?' चालू':' बंद')+' कर दिया।')}
