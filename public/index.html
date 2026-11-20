@@ -67,7 +67,7 @@ label{color:var(--mut)}
     <canvas id="orbcv" aria-hidden="true"></canvas>
     <button id="mic" aria-label="बोलना शुरू करो">🎤</button>
   </div>
-  <label><input type="checkbox" id="wake"> हमेशा सुनो, “Jarvis” बोलने पर जागो</label>
+  <p class="m" style="text-align:center">mic दबाओ और सीधे बात करो, “Jarvis” बोलना ज़रूरी नहीं</p>
 </div>
 
 <div class="row">
@@ -98,7 +98,7 @@ label{color:var(--mut)}
 
 <script>
 const $=s=>document.querySelector(s);
-const J3={pulse:0,think:0};let speaking=false,speakEnd=0;
+const J3={pulse:0,think:0};let speaking=false,speakEnd=0;const H=[];
 let NAME='',TOKEN='';try{TOKEN=localStorage.getItem('jt')||''}catch(e){}
 const D={light:{n:'लाइट',i:'💡',k:['light','lights','लाइट','लाईट','लाइट्स','बत्ती','batti','bulb','बल्ब']},
  fan:{n:'पंखा',i:'🌀',k:['fan','पंखा','पंखे','pankha','फैन']},
@@ -107,7 +107,7 @@ const D={light:{n:'लाइट',i:'💡',k:['light','lights','लाइट','�
 let S={light:0,fan:0,ac:0,tv:0},ws=null,rec=null,listening=false,W=[];
 async function api(p,m,b){const r=await fetch(p,{method:m||'GET',headers:{'Content-Type':'application/json',Authorization:'Bearer '+TOKEN},body:b?JSON.stringify(b):undefined});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||'कुछ गड़बड़ हुई');return j}
 const save=()=>{api('/api/devices','PUT',S).catch(()=>{})};
-async function ask(t){J3.think=1;setSt('🤔 सोच रहा हूँ…',true);try{const r=await api('/api/chat','POST',{text:t});S=Object.assign(S,r.devices);render();say(r.reply);(r.pc||[]).forEach(pc)}catch(e){say(e.message)}finally{J3.think=0;setSt(ST0)}}
+async function ask(t){J3.think=1;setSt('🤔 सोच रहा हूँ…',true);try{const r=await api('/api/chat','POST',{text:t,history:H.slice(-8)});H.push({r:'user',t},{r:'model',t:r.reply});if(H.length>12)H.splice(0,H.length-12);S=Object.assign(S,r.devices);render();say(r.reply);(r.pc||[]).forEach(pc)}catch(e){say(e.message)}finally{J3.think=0;setSt(ST0)}}
 function render(){$('#grid').innerHTML=Object.keys(D).map(k=>`<button class="dev ${S[k]?'on':''}" data-k="${k}"><span>${D[k].i}</span><b>${D[k].n}</b><small>${S[k]?'चालू':'बंद'}</small></button>`).join('')}
 $('#grid').onclick=e=>{const b=e.target.closest('.dev');if(b){S[b.dataset.k]^=1;save();render()}};
 function log(w,t){const d=document.createElement('div');d.className=w;d.textContent=(w==='U'?'🧑 ':'🤖 ')+t;$('#log').prepend(d);while($('#log').children.length>8)$('#log').lastChild.remove()}
@@ -134,15 +134,11 @@ function run(raw){
  ask(raw);
 }
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-let awakeUntil=0;
 function onVoice(t){
- if(!$('#wake').checked)return run(t);
- const m=t.match(/jarvis|जार्विस|जारविस|जरविस|जर्विस|जार्वस|जार्विश|जारवीस|जार्वीस|जरवीस/i);
- if(m){const rest=t.slice(m.index+m[0].length).trim();
-  if(rest)return run(rest);
-  awakeUntil=Date.now()+10000;return say('जी '+NAME+', बोलिए।')}
- if(Date.now()<awakeUntil){awakeUntil=0;return run(t)}
- setSt('😴 पहले “Jarvis” बोलो, जैसे: “Jarvis light on कर”',false);
+ const m=t.match(/^\s*(jarvis|जार्विस|जारविस|जरविस|जर्विस|जार्वस|जार्विश|जारवीस|जार्वीस|जरवीस)[\s,।.!?]*/i);
+ const rest=m?t.slice(m[0].length).trim():t.trim();
+ if(!rest)return say('जी '+NAME+', बोलिए।');
+ run(rest);
 }
 const ST0=$('#st').textContent;let stT=0;
 function setSt(t,keep){$('#st').textContent=t;clearTimeout(stT);if(!keep)stT=setTimeout(()=>{$('#st').textContent=ST0},6000)}
